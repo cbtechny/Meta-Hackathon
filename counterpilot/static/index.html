@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CounterPilot · Parts with context</title><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script></head>
+<body>
+<header><a class="wordmark" href="/">◈ CounterPilot<span>PARTS WITH CONTEXT</span></a><span class="mode">LOCAL DEMO <i></i></span></header>
+<main>
+<section class="intro"><p class="eyebrow">A SECOND SET OF EYES AT THE PARTS COUNTER</p><h1>The right question.<br><em>Before the wrong part.</em></h1><p>Describe what you need. Get a clear interpretation, the missing details, and candidates backed by application records.</p><div class="scope">5 vehicle families <span> / </span> 30 fictional records <span> / </span> Filters + brake rotors</div></section>
+<div class="workspace">
+<section class="panel request-panel"><div class="section-head"><span class="step">01</span><h2>What's coming across the counter?</h2></div>
+<form id="search-form">
+<label for="request">Customer request</label><textarea id="request" rows="4" maxlength="2000" placeholder="I need rear rotors for a 2021 Ford F-150"></textarea>
+<div class="examples"><span>TRY A REQUEST</span><button type="button" data-prompt="Oil filter for a 2019 Toyota RAV4">A simple match ↗</button><button type="button" data-prompt="Rear rotors for a 2021 Ford F-150">Catch a package split ↗</button><button type="button" data-prompt="Brake rotors for a 2021 Volkswagen Tiguan">Ask front or rear ↗</button></div>
+<div class="provider-row"><label for="provider">Interpretation</label><select id="provider"><option value="mock">Offline demo parser</option><option value="manual">Manual details only</option><option value="meta">Meta · live / unverified</option></select></div>
+<p class="hint" id="provider-note">Offline parser uses a small vocabulary. Manual details are always available.</p>
+<details id="details"><summary>Vehicle & part details <span>Review or enter manually</span></summary>
+<div class="fields">
+<label class="wide">Demo configuration<select id="vehicle"><option value="">Select a supported configuration</option></select></label>
+<label>Year<input id="year" type="number" min="1980" max="2100" placeholder="2021"></label><label>Make<input id="make" maxlength="40" placeholder="Ford"></label>
+<label class="wide">Model<input id="model" maxlength="40" placeholder="F-150"></label>
+<label>Part<select id="category"><option value="">Select a part</option><option value="oil_filter">Oil filter</option><option value="air_filter">Engine air filter</option><option value="cabin_filter">Cabin air filter</option><option value="brake_rotor">Brake rotor</option><option value="unsupported">Other / outside coverage</option></select></label>
+<label>Position<select id="position"><option value="">Not specified</option><option value="front">Front</option><option value="rear">Rear</option></select></label>
+<label class="wide">Brake package · fictional demo options<select id="brake_package"><option value="">Unknown / ask customer</option><option value="standard">Standard</option><option value="heavy-duty">Heavy-duty</option></select></label>
+</div></details>
+<button class="primary" type="submit" id="submit">Find candidates <span>→</span></button>
+<button class="reset" type="button" id="reset">Clear request & details</button>
+</form>
+<details class="vin"><summary>Have a VIN? <span>Optional identity lookup</span></summary>
+<p class="hint">NHTSA identity lookup needs internet. Confirm decoded fields before using them; equipment and fitment may remain unknown.</p>
+<form id="vin-form"><label for="vin">Vehicle identification number</label><div class="vin-row"><input id="vin" maxlength="40" autocomplete="off" placeholder="17-character VIN" required><button type="submit" id="vin-submit">Decode</button></div></form><div id="vin-result" aria-live="polite"></div>
+</details></section>
+<section class="panel results-panel" aria-live="polite" aria-busy="false" id="results">
+<div class="section-head"><span class="step">02</span><h2>Application check</h2></div>
+<div id="result-body"><div class="empty"><div class="diagram">REQUEST <b>→</b> CRITERIA <b>→</b> EVIDENCE</div><h3>Start with the customer's words.</h3><p>CounterPilot separates language interpretation from catalog matching. Missing details become questions.</p><div class="legend"><span>01 Interpret the request</span><span>02 Resolve the unknowns</span><span>03 Inspect the evidence</span></div></div></div>
+</section></div>
+<footer><strong>Demonstration data only.</strong> Every part number and application is fictional. Do not use for purchasing or installation. <span>COUNTERPILOT / PROTOTYPE 0.1</span></footer>
+</main></body></html>
