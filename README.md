@@ -1,6 +1,8 @@
 # CounterPilot
 A local parts-counter demonstration: interpret a request, ask about missing details, and inspect catalog application evidence.
 
+For an in-depth architectural guide written for learners—including analogies, sequence flows, Mermaid diagrams, API references, tradeoffs, and a "Where do I change..." guide—see [docs/ELI5_ARCHITECTURE_MANUAL.md](docs/ELI5_ARCHITECTURE_MANUAL.md).
+
 **Every demo part number, cross-reference, and application is fictional. Do not use this app for purchasing or installation.** The five vehicle descriptions are scenario labels, not independently verified equipment records. The workbook and private research are not imported.
 
 ## Start on Windows

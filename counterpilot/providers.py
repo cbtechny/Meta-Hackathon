@@ -1,3 +1,20 @@
+"""Language interpretation providers for CounterPilot.
+
+Architectural Role:
+    This module defines the `LanguageProvider` protocol and its implementations.
+    The provider translates messy, unstructured human text into a clean, structured `Criteria` object.
+    Crucially:
+      - Providers ONLY translate customer statements into search parameters.
+      - Providers NEVER access catalog inventory, check stock, or decide fitment.
+      - Providers NEVER invent or guess missing information (e.g., if the user didn't mention year,
+        the provider leaves year as None so domain logic can trigger an explicit clarification).
+
+Implementations:
+    - MockProvider: Fast, bounded offline regex heuristic parser. Works without any network access or keys.
+    - MetaProvider: Remote LLM adapter using Meta's Chat Completions API with strict JSON schema validation.
+    - Manual mode (in app.py) bypasses providers entirely and builds `Criteria` directly from UI controls.
+"""
+
 from __future__ import annotations
 
 import json
@@ -11,15 +28,42 @@ from .domain import Criteria
 
 
 class ProviderError(RuntimeError):
+    """Raised when an interpretation provider encounters a configuration, network, or parsing failure.
+
+    This exception is caught by the API layer (`app.py`) and translated to an HTTP 503 Service Unavailable,
+    preserving application integrity without crashing the process or silently falling back to a different provider.
+    """
     pass
 
 
 class LanguageProvider(Protocol):
+    """Protocol defining the language interpretation interface.
+
+    Any provider (mock, local model, cloud LLM) must implement `interpret(text: str) -> Criteria`.
+    This decouples language parsing technology from the catalog lookup engine.
+    """
     name: str
-    def interpret(self, text: str) -> Criteria: ...
+
+    def interpret(self, text: str) -> Criteria:
+        """Parse natural language request text into structured vehicle and part criteria."""
+        ...
 
 
 class MockProvider:
+    """Offline, deterministic regex-based interpreter.
+
+    Why this exists:
+        - Allows the demo, tests, and local workflows to operate with zero network dependencies or API keys.
+        - Provides predictable parsing for supported vehicle families and categories.
+
+    Key Non-Obvious Decisions:
+        - Bounded vocabulary: Only recognizes supported models and categories. Unknown words trigger 'unsupported'.
+        - Ambiguity protection:
+            * Multiple years (e.g. "2019 or 2023") yields None, triggering clarification rather than picking one.
+            * Explicit contradictions (e.g. "Ford RAV4") clear both make and model so the user must clarify.
+            * "Cabin air filter" is disambiguated so it doesn't trigger "air filter" (engine).
+        - Conservative by design: Better to ask than guess wrong.
+    """
     name = "mock"
 
     def interpret(self, text: str) -> Criteria:
@@ -85,6 +129,20 @@ class MockProvider:
 
 
 class MetaProvider:
+    """External LLM adapter connecting to Meta's Chat Completions endpoint.
+
+    Architecture & Privacy Boundaries:
+        - Only the customer request text is transmitted over the wire.
+        - Catalog inventory, fitment rules, vehicle VINs, and explicit manual overrides are NEVER sent.
+        - Requires the `MODEL_API_KEY` environment variable.
+        - System prompt forces the model to emit strictly validated JSON matching `Criteria.model_json_schema()`.
+
+    Failure & Safety Handling:
+        - Output is rigorously validated against `Criteria.model_validate()`. Malformed JSON, hallucinated
+          fields (blocked by extra='forbid'), or invalid types raise a `ProviderError`.
+        - Raw upstream responses, HTTP error traces, and user text are kept out of customer-facing error messages
+          to prevent token/secret leakage.
+    """
     name = "meta"
 
     def interpret(self, text: str) -> Criteria:
@@ -116,4 +174,9 @@ class MetaProvider:
 
 
 def get_provider(name: str) -> LanguageProvider:
+    """Factory function returning the configured LanguageProvider instance.
+
+    Args:
+        name: Provider identifier ('meta' or 'mock'). Any value other than 'meta' defaults to MockProvider.
+    """
     return MetaProvider() if name == "meta" else MockProvider()
