@@ -29,6 +29,6 @@ The endpoint is `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues`. NHTSA
 
 VIN decode is a vehicle-identity aid, not a parts-fitment authority. Manufacturer-reported fields may be missing or broad, and the result may not identify brake package, production split, or other option-sensitive detail needed by a parts catalog. CounterPilot should retain the decoded fields as a proposed vehicle configuration, show unknowns, and then use deterministic catalog applications and clarification/physical measurement where required.
 
-Treat VINs as sensitive vehicle identifiers: do not log them unnecessarily or commit real customer VINs to Git. The code contains no credentials. This is a small reusable module, not yet connected to the project's web form or Muse Spark provider.
+Treat VINs as sensitive vehicle identifiers: do not log them unnecessarily or commit real customer VINs to Git. The code contains no credentials. The module is integrated into CounterPilot's backend via `POST /api/vin` and exposed in the web interface behind an explicit user confirmation step, remaining separate from language interpretation providers.
 
 Source: [NHTSA vPIC API](https://vpic.nhtsa.dot.gov/api/); [vPIC FAQ](https://vpic.nhtsa.dot.gov/api/Home/Index/FAQ).
