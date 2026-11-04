@@ -188,7 +188,7 @@
    if(openCombo)showCombo(openCombo);scheduleExamples();
   }catch{$('suggestions-status').textContent='Suggestions are unavailable. You can still type any details.';}
  }
- function syncControls(){for(const button of document.querySelectorAll('.chat-follow-up button,.lookup-recovery button'))button.disabled=busy||!!pending||button.closest('.chat-message').classList.contains('previous-result');syncComparison();}
+ function syncControls(){for(const button of document.querySelectorAll('.chat-follow-up button,.lookup-recovery button,.request-item .edit-item'))button.disabled=busy||!!pending||button.closest('.chat-message').classList.contains('previous-result');syncComparison();}
  function setBusy(value){busy=value;window.CounterPilotAssist?.setBusy(value||!!pending);window.CounterPilotUI?.setBusy(value||!!pending);$('edit-failed').disabled=value;$('resume-chat').disabled=value;$('chat-send').disabled=value||!!pending;$('chat-input').disabled=value||!!pending;$('retry').disabled=value;for(const f of fields)$('chat-'+f).disabled=value||!!pending;for(const toggle of document.querySelectorAll('.combo-toggle'))toggle.disabled=value||!!pending;$('apply-details').disabled=value||!!pending||!Object.keys(readEdits()).length;$('typing').hidden=!value;$('chat-messages').setAttribute('aria-busy',String(value));syncControls();}
  function showDetails(){
   const known=Object.values(details).filter(v=>v!=null&&v!=='').length;
@@ -203,6 +203,7 @@
   const state=lastResult?.state;
   $('vehicle-source').textContent=state?.vin?`VIN ${state.vin} \u00b7 ${state.confirmed?'identity confirmed':'identity unconfirmed'}`:state?.decoded?'VIN detached from edited vehicle; original decode retained.':'';
   $('vehicle-source').hidden=!$('vehicle-source').textContent;$('details-toggle').hidden=!active;$('details-count').textContent=String(known);
+  if(lastResult?.parts?.length){$('vehicle-source').textContent=`Editing item ${(lastResult.active_part||0)+1} of ${lastResult.parts.length}. `+$('vehicle-source').textContent;$('vehicle-source').hidden=false;}
   if(!active)setDetailsOpen(false);else if(lastKnownCount===0&&!panelDismissed&&!narrowPanel.matches)setDetailsOpen(true);
   lastKnownCount=known;updateLayout();
   setBusy(busy);
@@ -234,10 +235,24 @@
   const result=snapshot.result,lookup=result.lookup;
   node.dataset.snapshot=String(snapshot.messageIndex);node.classList.toggle('previous-result',!!snapshot.previous);
   const age=el('p','Previous result. For the details supplied at that time.','result-age');age.hidden=!snapshot.previous||!lookup.candidates?.length;node.append(age);
-  if(lookup.candidates?.length){
-   node.classList.add('has-results');
+  if(lookup.candidates?.length||lookup.items?.length){
+   if(lookup.candidates?.length)node.classList.add('has-results');
    const host=el('section',undefined,'inline-results');host.setAttribute('aria-label','Retrieved part records');host.append(el('div',`${lookup.candidates.length} catalog ${lookup.candidates.length===1?'application':'applications'} · review the configuration`,'results-heading'));
-   for(const [index,part] of lookup.candidates.entries()){
+   const itemHosts=new Map();
+   const checklist=lookup.items?.length?el('div',undefined,'requested-list'):null;
+   if(checklist){checklist.setAttribute('aria-label','Requested parts');host.append(checklist);}
+   for(const item of lookup.items||[]){
+    const group=el('section',undefined,'request-item');group.dataset.item=String(item.index);
+    group.append(el('h3',`Item ${item.index+1}: ${[item.position,item.side,item.part].filter(Boolean).join(' ')}`));
+    const count=item.lookup.candidates.length;
+    group.append(el('p',count?`${count} catalog ${count===1?'record':'records'} to review`:item.question?'Needs clarification':item.lookup.status==='outside_coverage'?'No application loaded':'Detail still unconfirmed','request-status'));
+    if(!count)group.append(el('p',item.question?.label||item.reply,'hint'));
+    const edit=el('button',`Edit item ${item.index+1}`,'edit-item');edit.type='button';edit.onclick=()=>sendText(`Edit item ${item.index+1}`);group.append(edit);
+    const jump=el('button',`${item.index+1}. ${item.part} · ${count?'Records found':item.question?'Needs clarification':'No records yet'}`,'item-jump');jump.type='button';jump.onclick=()=>group.scrollIntoView({block:'start',behavior:'instant'});checklist.append(jump);
+    itemHosts.set(item.index,group);host.append(group);
+   }
+   const displayed=lookup.items?.length?lookup.items.flatMap(item=>item.lookup.candidates.map(part=>({part,item}))):lookup.candidates.map(part=>({part,item:null}));
+   for(const [index,{part,item}] of displayed.entries()){
     const card=el('article',undefined,'candidate');
     card.append(productPhoto(part),el('span',part.display_label,'badge'),el('h3',part.name),el('p',part.part_number,'part-number'),el('p',priceText(part),'part-price'),el('p','Brand: '+part.brand,'candidate-brand'));
     const profile=(lookup.applications||[]).find(v=>v.id===part.vehicle_id)||lookup.vehicle;
@@ -253,10 +268,20 @@
      const label=el('label',undefined,'compare-choice'),input=el('input');input.type='checkbox';input.setAttribute('aria-label','Compare '+part.name+' '+part.part_number);const key=`${snapshot.messageIndex}:${index}`;
      input.onchange=()=>{if(input.checked&&compared.size<3)compared.set(key,{part,profile});else{compared.delete(key);input.checked=false;}syncComparison();};label.append(input,document.createTextNode('Compare'));card.append(label);
     }
-    host.append(card);
+    (item?itemHosts.get(item.index):host).append(card);
    }
    if(lookup.candidates.length>1){const tools=el('div',undefined,'compare-toolbar'),status=el('p','Select 2 or 3 records to compare.','compare-status'),button=el('button','Compare selected','compare-open');status.setAttribute('role','status');button.type='button';button.disabled=true;button.onclick=openComparison;tools.append(status,button);host.append(tools);}
-   renderProgress(lookup,host);node.append(host);
+   if(lookup.candidates.length){
+    renderProgress(lookup,host);
+    if(window.CounterPilotGarage){
+     const prompt=el('section',undefined,'garage-prompt');prompt.append(el('strong',lookup.candidates.length===1?'Want to keep this result in your Garage?':'Want to keep these results in your Garage?'),el('p','Save the displayed vehicle applications for your next visit. You can also save individual cards.','hint'));
+     const records=lookup.candidates.map(part=>({part,vehicle:(lookup.applications||[]).find(v=>v.id===part.vehicle_id)||lookup.vehicle})).filter(record=>record.vehicle);
+     if(records.length)prompt.append(window.CounterPilotGarage.saveAllButton(records));
+     const another=el('button','Add another part','add-another-part');another.type='button';another.onclick=()=>{if(busy||pending)return;$('chat-input').value='Also add ';resizeComposer();$('chat-input').focus({preventScroll:true});save();};prompt.append(another);
+     if(checklist)checklist.after(prompt);else host.append(prompt);
+    }
+   }
+   node.append(host);
   }
   if(lookup.status==='outside_coverage'){
    const recovery=el('section',undefined,'lookup-recovery');recovery.append(el('span','CATALOG COVERAGE','recovery-label'),el('h3','No application loaded'),el('p','Your details are kept. Edit the request or explore a configuration in the demo catalog.'));
@@ -270,11 +295,11 @@
    const choices=el('div',undefined,'chat-options');
    for(const value of q.options||[]){const button=el('button',value);button.type='button';button.onclick=()=>sendText(value);choices.append(button);}
    if(q.optional){const skip=el('button',"I don't know / skip");skip.type='button';skip.className='skip-detail';skip.onclick=()=>sendText("I don't know the "+q.field);choices.append(skip);}
-   follow.append(choices);node.append(follow);
+   follow.append(choices);if(lookup.items?.length&&node.querySelector('.inline-results'))node.insertBefore(follow,node.querySelector('.inline-results'));else node.append(follow);
   }
   syncControls();
  }
- function snapshotOf(result,messageIndex){return {messageIndex,previous:false,result:{reply:result.reply,details:result.details,lookup:result.lookup,question:result.question,session_id:result.session_id,revision:result.revision}};}
+ function snapshotOf(result,messageIndex){return {messageIndex,previous:false,result:{reply:result.reply,details:result.details,parts:result.parts,active_part:result.active_part,lookup:result.lookup,question:result.question,session_id:result.session_id,revision:result.revision}};}
  async function deliver(){
   if(busy||!pending)return;
   const token=++version;controller=new AbortController();const request=controller;
@@ -292,7 +317,7 @@
    const node=bubble('assistant',data.reply),snapshot=snapshotOf(data,history.length-1);snapshots.push(snapshot);renderSnapshot(snapshot,node);showDetails();save();
    if(data.lookup.candidates.length)showHint('parts','Your part number is in the card. Open Source and restrictions for the evidence.');
    else if(Object.values(details).some(v=>v!=null&&v!==''))showHint('details','Details fill in as you chat. Open Details to edit or choose a registered value.');
-   reveal=node.querySelector('.inline-results')||node;
+   reveal=data.lookup.items?.length?node:node.querySelector('.inline-results')||node;
   }catch(error){
    if(token!==version)return;
    const expired=error.status===409;
@@ -312,7 +337,7 @@
  $('chat-input').oninput=()=>{resizeComposer();save();};
  $('retry').onclick=deliver;
  $('edit-failed').onclick=()=>{if(busy||!pending)return;const text=pending.payload.message,edits=pending.payload.edits;document.querySelector('.pending-message')?.remove();pending=null;$('chat-error').hidden=true;updateLayout();if(edits){showDetails();for(const [field,value] of Object.entries(edits))if(fields.includes(field))$('chat-'+field).value=fieldText(field,value);setBusy(false);setDetailsOpen(true,true);window.CounterPilotUI?.announce('Review your unapplied changes, then update the lookup.');}else{$('chat-input').value=text;setBusy(false);resizeComposer();$('chat-input').focus({preventScroll:true});}save();};
- $('resume-chat').onclick=()=>{if(busy||!pending)return;pending.payload={...pending.payload,session_id:null,revision:0,request_id:crypto.randomUUID().replaceAll('-',''),details,history:[...context(),...(lastResult?.question?[{role:'assistant',content:lastResult.question.label}]:[])].slice(-20)};save();deliver();};
+ $('resume-chat').onclick=()=>{if(busy||!pending)return;pending.payload={...pending.payload,session_id:null,revision:0,request_id:crypto.randomUUID().replaceAll('-',''),details,parts:lastResult?.parts||[],active_part:lastResult?.active_part||0,history:[...context(),...(lastResult?.question?[{role:'assistant',content:lastResult.question.label}]:[])].slice(-20)};save();deliver();};
  window.addEventListener('counterpilot:use-vehicle',event=>{
   if(busy||pending){event.preventDefault();window.CounterPilotUI?.announce('Finish or edit the pending request before changing vehicles.');return;}
   const vehicle=registered.vehicles.find(v=>v.id===event.detail?.id)||event.detail;if(!vehicle||typeof vehicle.id!=='string'||!/^[A-Za-z0-9._-]{1,80}$/.test(vehicle.id)||!Number.isInteger(vehicle.year)||typeof vehicle.make!=='string'||typeof vehicle.model!=='string'){event.preventDefault();window.CounterPilotUI?.announce('That vehicle could not be loaded. Try the catalog again.');return;}

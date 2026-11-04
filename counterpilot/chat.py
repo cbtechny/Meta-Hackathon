@@ -38,6 +38,20 @@ class ChatDetails(BaseModel):
         return value or None
 
 
+class PartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    part: str = Field(min_length=1, max_length=80)
+    position: Literal["front", "rear"] | None = None
+    side: Literal["left", "right"] | None = None
+
+
+class ConversationUpdate(ChatDetails):
+    # Latest-message items only; shared vehicle facts remain on ChatDetails.
+    parts: list[PartRequest] | None = Field(default=None, min_length=1, max_length=20)
+    parts_action: Literal["replace", "append"] = "replace"
+    item_index: int | None = Field(default=None, ge=0, le=19)
+
+
 class ChatMessage(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     role: Literal["user", "assistant"]
@@ -49,6 +63,8 @@ class ChatRequest(BaseModel):
     message: str = Field(default="", max_length=2000)
     history: list[ChatMessage] = Field(default_factory=list, max_length=24)
     details: ChatDetails = Field(default_factory=ChatDetails)
+    parts: list[PartRequest] = Field(default_factory=list, max_length=20)
+    active_part: int = Field(default=0, ge=0, le=19)
     edits: ChatDetails | None = None
     session_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     revision: int = Field(default=0, ge=0)
@@ -84,6 +100,11 @@ def merge_details(current: ChatDetails, update: ChatDetails) -> ChatDetails:
 
 class Conversation(BaseModel):
     details: ChatDetails = Field(default_factory=ChatDetails)
+    parts: list[PartRequest] = Field(default_factory=list, max_length=20)
+    active_part: int = 0
+    item_attempts: dict[int, dict[str, int]] = Field(default_factory=dict)
+    proposed_parts: list[PartRequest] | None = None
+    proposed_parts_action: Literal["replace", "append"] = "replace"
     sources: dict[str, str] = Field(default_factory=dict)
     decoded: ChatDetails | None = None
     vin: str | None = None
@@ -149,6 +170,49 @@ def application_facts(details, catalog=CATALOG):
 
 
 def lookup_reply(details: ChatDetails, state: Conversation | None = None, catalog=None) -> dict:
+    if not state or not state.parts or (state.pending and state.pending["field"] in {"vin_confirmation", "override_confirmation"}):
+        return single_lookup_reply(details, state, catalog)
+    items = []
+    state.item_attempts[state.active_part] = dict(state.attempts)
+    for index, item in enumerate(state.parts):
+        item_details = ChatDetails(**{**details.model_dump(), **item.model_dump(), "symptoms": None})
+        child = state.model_copy(update={"details": item_details, "parts": [], "pending": None,
+                                         "attempts": state.item_attempts.get(index, {})})
+        response = single_lookup_reply(item_details, child, catalog)
+        items.append({"index": index, **item.model_dump(), "details": item_details.model_dump(),
+                      "reply": response["reply"], "question": response["question"],
+                      "pending": response.get("pending"), "lookup": response["lookup"]})
+    # Ask one scoped question while showing all independently available records.
+    order = [state.active_part] + [i for i in range(len(items)) if i != state.active_part]
+    target = next((items[i] for i in order if items[i]["question"]), None)
+    pending = target or next((items[i] for i in order if items[i]["pending"]), None)
+    q = None
+    if pending:
+        state.active_part = pending["index"]
+        original = pending["question"] or pending["pending"]
+        scoped = {**original, "item_index": state.active_part,
+                  "label": f"Item {state.active_part + 1} ({pending['part']}): {original['label']}"}
+        if target:
+            q = scoped
+    else:
+        scoped = None
+    active = state.parts[state.active_part]
+    state.attempts = dict(state.item_attempts.get(state.active_part, {}))
+    state.details = ChatDetails(**{**details.model_dump(), **active.model_dump()})
+    candidates = {p["id"]: p for item in items for p in item["lookup"]["candidates"]}
+    applications = {v["id"]: v for item in items for v in item["lookup"].get("applications", [])}
+    covered = sum(bool(item["lookup"]["candidates"]) for item in items)
+    reply = f"I'm tracking {len(items)} separate requested items. {covered} have catalog records to review."
+    lookup = {"status": "candidates" if candidates else "needs_clarification" if q else "outside_coverage",
+              "candidates": list(candidates.values()), "applications": list(applications.values()),
+              "questions": [q] if q else [], "items": items, "active_item": state.active_part,
+              "unconfirmed_fields": sorted({f for item in items for f in item["lookup"].get("unconfirmed_fields", [])}),
+              "fitment_confirmed": False,
+              "notice": "Each requested item is looked up separately. Demo records use simulated fitment."}
+    return {"details": state.details.model_dump(), "reply": reply, "question": q, "pending": scoped, "lookup": lookup}
+
+
+def single_lookup_reply(details: ChatDetails, state: Conversation | None = None, catalog=None) -> dict:
     catalog = catalog or CATALOG
     state = state or Conversation(details=details)
     kind = resolve_part_type(details.part, catalog)
@@ -159,9 +223,11 @@ def lookup_reply(details: ChatDetails, state: Conversation | None = None, catalo
     reply = ""
     if state.pending and state.pending["field"] in {"vin_confirmation", "override_confirmation"}:
         q = state.pending
-    elif not details.part or details.part.casefold() in {"filter", "filters", "brakes", "brake"}:
+    elif not details.part or details.part.casefold() in {"filter", "filters", "brakes", "brake", "belt", "belts"}:
         if details.part and "filter" in details.part.casefold():
             q = question("part", "Which filter—oil, engine air, or cabin air?", ["Oil", "Engine air", "Cabin air"])
+        elif details.part and details.part.casefold() in {"belt", "belts"}:
+            q = question("part", "Which belt do you need: a serpentine/drive belt, timing belt, or another belt?", ["Serpentine belt", "Timing belt"])
         elif details.part:
             q = question("part", "Do you need brake pads, rotors, calipers, or help describing a brake problem?", ["Brake pads", "Brake rotors", "Brake calipers"])
         elif details.symptoms:

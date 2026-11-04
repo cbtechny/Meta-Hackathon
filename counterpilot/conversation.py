@@ -10,9 +10,9 @@ import uuid
 from dataclasses import dataclass, field
 
 from fastapi import HTTPException
-from .chat import ChatDetails, ChatMessage, ChatRequest, Conversation, application_facts, detail_progress, engine_matches, lookup_reply, merge_details, question, stated_engine_displacement
-from .domain import CATALOG, extract_part_type
-from .providers import MetaProvider
+from .chat import ChatDetails, ChatMessage, ChatRequest, Conversation, PartRequest, application_facts, detail_progress, engine_matches, lookup_reply, merge_details, question, stated_engine_displacement
+from .domain import CATALOG, extract_part_type, resolve_part_type
+from .providers import MetaProvider, ProviderError
 from counterpilot_vin_lookup import VIN_PATTERN, VinLookupError
 
 
@@ -49,7 +49,7 @@ def respond(request: ChatRequest, decode_vin):
             if session is None:
                 if len(SESSIONS) >= 256:
                     raise HTTPException(503, "Chat is busy. Retry shortly.")
-                session = Session(state=Conversation(details=request.details))
+                session = Session(state=Conversation(details=request.details, parts=request.parts, active_part=min(request.active_part, max(0, len(request.parts) - 1))))
                 SESSIONS[session_id] = session
     with session.lock:
         fingerprint = hashlib.sha256(request.model_dump_json(exclude={"context"}).encode()).hexdigest()
@@ -68,7 +68,7 @@ def respond(request: ChatRequest, decode_vin):
         result = advance(state, request, decode_vin)
         progress = detail_progress(state)
         result["lookup"]["detail_progress"] = progress
-        if result["lookup"]["candidates"] and not result.get("question"):
+        if result["lookup"]["candidates"] and not result.get("question") and not result.get("pending"):
             # A preview remains visible while optional details are clarified.
             for field, label in (("engine", "What engine does your vehicle have?"),
                                  ("trim", "Which trim does your vehicle have?"),
@@ -91,6 +91,7 @@ def respond(request: ChatRequest, decode_vin):
         with STORE_LOCK:
             SESSIONS[session_id] = session
         response = {**result, "session_id": session_id, "revision": state.revision,
+                "parts": [item.model_dump() for item in state.parts], "active_part": state.active_part,
                 "state": {"sources": state.sources, "decoded": state.decoded.model_dump() if state.decoded else None,
                           "vin": state.vin, "confirmed": state.confirmed, "overrides": state.overrides,
                           "vin_declined": state.vin_declined, "pending": state.pending,
@@ -116,6 +117,7 @@ def apply_update(state, update, source="customer"):
         state.overrides = {}
         state.vin_declined = False
         state.skipped_preview_fields.clear()
+        state.item_attempts.clear()
     new = merge_details(old, update)
     if new != old:
         if any(getattr(old, f) != getattr(new, f) for f in ("year", "make", "model", "engine", "trim", "drivetrain", "hybrid")):
@@ -134,6 +136,30 @@ def apply_update(state, update, source="customer"):
                 if state.decoded and getattr(state.decoded, f) != getattr(new, f):
                     state.overrides[f] = getattr(new, f)
     state.details = new
+    if state.parts:
+        state.parts[state.active_part] = PartRequest(part=new.part or state.parts[state.active_part].part,
+                                                    position=new.position, side=new.side)
+        if changed_vehicle:
+            state.parts = [item.model_copy(update={"position": None, "side": None}) for item in state.parts]
+
+
+def update_requested_parts(state, requested, action):
+    incoming = [item if isinstance(item, PartRequest) else PartRequest(**item) for item in requested]
+    existing = state.parts or ([PartRequest(part=state.details.part, position=state.details.position,
+                                         side=state.details.side)] if state.details.part else [])
+    combined = existing + incoming if action == "append" else incoming
+    unique = {}
+    for item in combined:
+        kind = resolve_part_type(item.part)
+        key = (kind if kind != "unsupported" else item.part.casefold(), item.position, item.side)
+        unique.setdefault(key, item)
+    if len(unique) > 20:
+        raise HTTPException(422, "Keep a request to 20 separate items or fewer.")
+    state.parts = list(unique.values())
+    state.active_part = len(existing) if action == "append" and len(state.parts) > len(existing) else 0
+    active = state.parts[state.active_part]
+    state.details = ChatDetails(**{**state.details.model_dump(), **active.model_dump(), "symptoms": None})
+    state.pending, state.proposed, state.attempts, state.item_attempts = None, None, {}, {}
 
 
 def explicitly_stated(text, field, value):
@@ -156,6 +182,22 @@ def explicitly_stated(text, field, value):
 def advance(state, request, decode_vin):
     text = request.message.strip()
     lower = text.casefold().replace('’', "'")
+    edit_item = re.fullmatch(r"edit item (\d{1,2})", lower)
+    if edit_item and state.parts:
+        index = int(edit_item[1]) - 1
+        if not 0 <= index < len(state.parts):
+            return message_result(state, "Choose an item from the current requested-parts list.", state.pending)
+        state.item_attempts[state.active_part] = dict(state.attempts)
+        state.attempts = dict(state.item_attempts.get(index, {}))
+        state.active_part = index
+        state.details = ChatDetails(**{**state.details.model_dump(), **state.parts[index].model_dump()})
+        result = lookup_reply(state.details, state)
+        state.active_part = index
+        state.details = ChatDetails(**{**state.details.model_dump(), **state.parts[index].model_dump()})
+        q = {**question("part", f"What would you like to change for item {index + 1} ({state.parts[index].part})?"), "item_index": index}
+        result.update(details=state.details.model_dump(), reply=f"Editing item {index + 1}: {state.parts[index].part}.", question=q, pending=q)
+        result["lookup"].update(questions=[q], active_item=index)
+        return result
     if re.fullmatch(r"(?:start over|reset|new conversation)[.!]?", lower):
         clean = Conversation()
         for f in Conversation.model_fields:
@@ -163,7 +205,9 @@ def advance(state, request, decode_vin):
         return message_result(state, "What part do you need?", question("part", "What part do you need?"))
     if re.fullmatch(r"(?:change|switch)(?: the)? vehicle[.!]?", lower):
         part = state.details.part
-        clean = Conversation(details=ChatDetails(part=part))
+        clean = Conversation(details=ChatDetails(part=part),
+                             parts=[item.model_copy(update={"position": None, "side": None}) for item in state.parts],
+                             active_part=state.active_part)
         for f in Conversation.model_fields:
             setattr(state, f, getattr(clean, f))
         return lookup_reply(state.details, state)
@@ -209,6 +253,9 @@ def advance(state, request, decode_vin):
                 if not adopting_decode:
                     state.overrides.update(proposed.model_dump(exclude_unset=True))
             state.confirmed, state.pending, state.proposed = True, None, None
+            if state.proposed_parts:
+                update_requested_parts(state, state.proposed_parts, state.proposed_parts_action)
+                state.proposed_parts = None
             for field, source in list(state.sources.items()):
                 if source == "VIN decoded":
                     state.sources[field] = "VIN confirmed"
@@ -217,6 +264,9 @@ def advance(state, request, decode_vin):
             if state.pending["field"] == "vin_confirmation":
                 state.decoded, state.vin = None, None
             state.pending, state.proposed = None, None
+            if state.proposed_parts:
+                update_requested_parts(state, state.proposed_parts, state.proposed_parts_action)
+                state.proposed_parts = None
             return lookup_reply(state.details, state)
     elif yes or no:
         return message_result(state, "What would you like to confirm or change?", state.pending)
@@ -268,10 +318,25 @@ def advance(state, request, decode_vin):
     # Every ordinary language turn really calls Meta. No successful-looking fallback.
     request = request.model_copy(update={"details": state.details, "history": state.history or request.history,
         "context": json.dumps({"pending": state.pending, "vin_declined": state.vin_declined,
+                               "requested_parts": [item.model_dump() for item in state.parts], "active_item": state.active_part,
                                "sources": state.sources, "decoded": state.decoded.model_dump() if state.decoded else None,
                                "applications": [{f: v.get(f) for f in ("year", "make", "model", "engine", "trim", "drivetrain")} for v in application_facts(state.details)]})})
     update = request.edits if request.edits is not None else MetaProvider().interpret_conversation(request)
     delta = update.model_dump(exclude_unset=True)
+    requested_parts = delta.pop("parts", None)
+    parts_action = delta.pop("parts_action", "replace")
+    item_index = delta.pop("item_index", None)
+    if item_index is not None:
+        if not 0 <= item_index < len(state.parts):
+            raise ProviderError("The requested item could not be identified. Select an item and try again.")
+        state.item_attempts[state.active_part] = dict(state.attempts)
+        state.attempts = dict(state.item_attempts.get(item_index, {}))
+        state.active_part = item_index
+        state.details = ChatDetails(**{**state.details.model_dump(), **state.parts[item_index].model_dump()})
+    if requested_parts:
+        # Item-specific qualifiers must never leak through the shared vehicle patch.
+        for field in ("part", "position", "side", "symptoms"):
+            delta.pop(field, None)
     if re.search(r"clicking|squealing|rattling|shaking|vibrat|won't start|overheat", lower) and not extract_part_type(lower):
         delta.pop("part", None)
         delta["symptoms"] = text[:300]
@@ -287,9 +352,9 @@ def advance(state, request, decode_vin):
             if state.pending and state.pending.get("optional"):
                 state.skipped_preview_fields.add(field)
     # Defend generic requests against accidental model over-specification.
-    if re.search(r"\bfilters?\b", lower) and not re.search(r"\b(oil|air|cabin|fuel|ac|pollen)\b", lower):
+    if not requested_parts and re.search(r"\bfilters?\b", lower) and not re.search(r"\b(oil|air|cabin|fuel|ac|pollen)\b", lower):
         delta["part"] = "filter"
-    if re.search(r"\bbrakes?\b", lower) and not re.search(r"\b(pads?|rotors?|discs?|disks?|calipers?|shoes?)\b", lower):
+    if not requested_parts and re.search(r"\bbrakes?\b", lower) and not re.search(r"\b(pads?|rotors?|discs?|disks?|calipers?|shoes?)\b", lower):
         delta["part"] = "brakes"
     if pending_field == "part" and state.details.part and "filter" in state.details.part.casefold():
         short = {"oil": "oil filter", "engine air": "engine air filter", "cabin air": "cabin air filter"}
@@ -321,10 +386,14 @@ def advance(state, request, decode_vin):
                      and str(v).casefold() != str(getattr(state.decoded, f)).casefold()}
         if conflicts:
             state.proposed = update
+            state.proposed_parts = [PartRequest(**item) for item in requested_parts] if requested_parts else None
+            state.proposed_parts_action = parts_action
             q = question("override_confirmation", "That differs from the VIN decode. Use your correction instead?", ["Yes", "No"])
             return message_result(state, q["label"], q)
     before = state.details.model_copy()
     apply_update(state, update)
+    if requested_parts:
+        update_requested_parts(state, requested_parts, parts_action)
     for field in ("year", "make", "model", "engine", "trim", "drivetrain"):
         value = getattr(state.details, field)
         if ((request.edits is not None and field in request.edits.model_fields_set and value is not None)

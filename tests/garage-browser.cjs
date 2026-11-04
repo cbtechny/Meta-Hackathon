@@ -13,7 +13,7 @@ const cookieName='counterpilot_garage_v1';
   await page.route('**/api/chat',route=>route.fulfill({json:fixture}));
   async function check(name,action){await action();passed.push(name);console.log('PASS '+name);}
   async function send(){await page.locator('#chat-input').fill('Oil filter for my 2007 Suzuki SX4');await page.locator('#chat-send').click();await page.locator('.garage-save').first().waitFor();await page.locator('#chat-send:not([disabled])').waitFor();}
-  async function open(){await page.locator('#garage-open').click();await page.locator('#garage-status').filter({hasText:/saved application|empty|could not be read/}).waitFor();}
+  async function open(){await page.locator('#garage-open').click();await page.locator('#garage-status').filter({hasText:/^(?:\d+ saved application|Your garage is empty|The saved garage could not be read)/}).waitFor();}
   await page.goto(base);
   await check('empty garage opens without an account',async()=>{await open();assert.match(await page.locator('#garage-status').innerText(),/empty/);await page.locator('#garage-close').click();});
   await send();

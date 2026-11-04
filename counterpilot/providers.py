@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 
 from pydantic import ValidationError
 from .domain import Criteria, extract_part_type
-from .chat import ChatDetails, ChatRequest, stated_engine_displacement
+from .chat import ChatDetails, ChatRequest, ConversationUpdate, stated_engine_displacement
 
 
 class ProviderError(RuntimeError):
@@ -119,7 +119,7 @@ class MetaProvider:
     def interpret_conversation(self, request: ChatRequest) -> ChatDetails:
         instructions = (
             "You extract lookup detail CHANGES from the latest customer message. Return only a JSON object; no prose or fences. "
-            "Use this schema: " + json.dumps(ChatDetails.model_json_schema()) +
+            "Use this schema: " + json.dumps(ConversationUpdate.model_json_schema()) +
             ". Omit unchanged fields. Use null ONLY when the customer explicitly clears a detail or says it is unknown. "
             "Never fill unknown engine, position, side, equipment or year from typical specifications. "
             "Resolve short answers using the most recent assistant question and current details. "
@@ -128,7 +128,19 @@ class MetaProvider:
             "Canonicalize recognizable make/model names (Toyota Camry, Ford F-150, Toyota RAV4, Honda CR-V, "
             "Chevrolet Silverado 1500, Volkswagen Tiguan, Suzuki SX4), including makes implied by an unambiguous model name. "
             "Use a short literal part name, such as oil filter, brake pads, starter, tie rod end or CV axle. "
-            "A generic filter stays 'filter': never assume oil. Generic brakes stay 'brakes'. "
+            "For ANY combination of requested parts, return a parts array with one object per separate requested item, "
+            "each containing part and only its explicitly stated position and side. Do not collapse a list into one part or choose just one. "
+            "Preserve unsupported and ambiguous items (brakes, belt) as separate entries. A belt tensioner is one item. "
+            "For example 'brakes, an air filter, and a belt' gives three entries: brakes, air filter, belt. "
+            "'Front pads and rear rotors' gives front brake pads and rear brake rotors; never transfer one item's position to another. "
+            "Use parts_action append only when the customer adds items with also/add/too; use replace for a new list. "
+            "An explicit replacement of the whole list with one part uses a one-entry parts array and replace. "
+            "For a clarification or correction of the active item, use ordinary part/position/side fields and OMIT parts. "
+            "If the customer explicitly corrects a different existing item, set item_index to its zero-based requested_parts index. "
+            "Never choose a different item_index without the customer naming or selecting that item. "
+            "For a single newly added item, use a one-entry parts array with append. Never echo existing items in parts. "
+            "Do not put a combined multi-item name into part. For a list, omit top-level part, position and side. "
+            "A generic filter stays 'filter': never assume oil. Generic brakes stay 'brakes'. Generic belt stays 'belt': never assume a belt type. "
             "Normalize stabilizer links to sway bar links, cabin AC filter to cabin air filter, front pads to brake pads plus front position. "
             "Four-cylinder does not establish displacement. Extract hybrid only if the customer explicitly states hybrid or non-hybrid. "
             "Capture symptoms without diagnosing them. If the customer switches parts, extract only the new requested part. "
@@ -143,8 +155,11 @@ class MetaProvider:
         messages = [{"role": "system", "content": instructions}]
         messages.extend(item.model_dump() for item in request.history)
         messages.append({"role": "user", "content": request.message})
-        update = self._extract(messages, ChatDetails, chat=True)
+        update = self._extract(messages, ConversationUpdate, chat=True)
         delta = update.model_dump(exclude_unset=True)
+        parts = delta.pop("parts", None)
+        parts_action = delta.pop("parts_action", "replace")
+        item_index = delta.pop("item_index", None)
         current = request.details.model_dump()
         # Treat echoed state as unchanged, even if the model returns a full
         # object instead of the requested patch. Never erase confirmed fields
@@ -170,7 +185,8 @@ class MetaProvider:
             mentioned = normalized in stated or stated_engine_displacement(request.message, engine)
             if not mentioned:
                 del delta["engine"]
-        return ChatDetails(**delta)
+        return ConversationUpdate(**delta, **({"parts": parts, "parts_action": parts_action} if parts else {}),
+                                  **({"item_index": item_index} if item_index is not None else {}))
 
 
 def get_provider(name: str) -> LanguageProvider:

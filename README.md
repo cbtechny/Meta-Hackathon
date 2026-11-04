@@ -118,6 +118,12 @@ requirements.lock.txt records the exact installed versions from this build; requ
 
 ## Cookie garage
 
+Chat accepts combinations such as “brakes, an air filter, and a belt.” Each requested item has its own part, position and side, with vehicle details shared across the list. The reply keeps available cards visible while asking one scoped clarification at a time. Unsupported items remain visible with their own coverage status. Use **Edit item**, say “also add an oil filter,” or explicitly replace the list. A request supports up to 20 separate items; requested-item counts and retrieved-record counts are distinct.
+
+After a lookup, chat offers to save the displayed records to Garage or add another part. Each card retains its individual save button. **Save all** saves only displayed catalog applications, deduplicates bookmarks, and leaves the existing garage intact if there is insufficient room. It does not save unresolved requests or establish fitment. Grouped replies survive reload and explicit continuation after a server restart. Restart the server and refresh the browser after updating.
+
+Multi-item regression checks: `python -m unittest discover -s tests -p test_multi_parts.py` and `node tests/multi-parts-browser.cjs` (using the browser setup above).
+
 Use **Add to garage** on a retrieved part card to bookmark its catalog vehicle application. **Garage** in the header groups saved records by vehicle, with remove and clear controls. No login or authentication is used. Up to 20 applications persist in a first-party cookie for a year, across reloads, new chats and server restarts. Only vehicle/part IDs are saved; displayed records and prices are resolved from the current catalog. Clearing browser cookies clears the garage. Restart with `start.ps1` after updating. See [Garage behavior and verification](Dev/Docs/GARAGE.md).
 
 

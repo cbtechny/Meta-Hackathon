@@ -18,6 +18,7 @@
  function sync(){
   const {items,invalid}=read();$('garage-count').textContent=String(items.length);$('garage-clear').disabled=!invalid&&!items.length;
   document.querySelectorAll('.garage-save').forEach(button=>{const saved=contains(items,button.dataset.vehicle,button.dataset.part);button.textContent=saved?'Saved to garage':'Add to garage';button.disabled=saved;button.setAttribute('aria-label',(saved?'Saved to garage: ':'Add to garage: ')+button.dataset.label);});
+  document.querySelectorAll('.garage-save-all').forEach(button=>{const entries=JSON.parse(button.dataset.entries),saved=entries.every(([vehicle,part])=>contains(items,vehicle,part));button.textContent=saved?'Saved to Garage':entries.length===1?'Save this result to Garage':`Save all ${entries.length} displayed records`;button.disabled=saved;});
  }
  function notify(text){
   clearTimeout(toastTimer);$('garage-toast').textContent=text;$('garage-toast').hidden=false;
@@ -77,7 +78,18 @@
   catch{if(token!==version)return;$('garage-status').textContent='Could not load your saved applications. Your garage cookie is kept.';const retry=node('button','Retry garage');retry.type='button';retry.onclick=()=>load();$('garage-items').append(retry);}
   finally{clearTimeout(timeout);}
  }
- window.CounterPilotGarage={saveButton(vehicle,part){
+ window.CounterPilotGarage={saveAllButton(records){
+  const entries=[...new Map(records.map(({vehicle,part})=>[JSON.stringify([vehicle.id,part.id]),[vehicle.id,part.id]])).values()];
+  const button=node('button',undefined,'garage-save-all');button.type='button';button.dataset.entries=JSON.stringify(entries);
+  const saved=entries.every(([vehicle,part])=>contains(read().items,vehicle,part));button.textContent=saved?'Saved to Garage':entries.length===1?'Save this result to Garage':`Save all ${entries.length} displayed records`;button.disabled=saved;
+  button.onclick=()=>{
+   const {items,invalid}=read();if(invalid){notify('The saved garage could not be read. Open Garage and clear it to start again.');return;}
+   const additions=entries.filter(([vehicle,part])=>!contains(items,vehicle,part));
+   if(items.length+additions.length>limit){notify('There is not enough room to save every displayed record. Save individual cards or remove an application from Garage.');return;}
+   if(persist([...items,...additions])){undoItems=null;$('garage-undo').hidden=true;notify(`${additions.length} application${additions.length===1?'':'s'} added to your garage.`);}
+  };
+  return button;
+ },saveButton(vehicle,part){
   const button=node('button',undefined,'garage-save');button.type='button';button.dataset.vehicle=vehicle.id;button.dataset.part=part.id;button.dataset.label=`${part.name} for ${vehicle.year} ${vehicle.make} ${vehicle.model}`;
   const saved=contains(read().items,vehicle.id,part.id);button.textContent=saved?'Saved to garage':'Add to garage';button.disabled=saved;button.setAttribute('aria-label',(saved?'Saved to garage: ':'Add to garage: ')+button.dataset.label);button.onclick=()=>add(vehicle.id,part.id);return button;
  }};

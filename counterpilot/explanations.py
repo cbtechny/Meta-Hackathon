@@ -54,8 +54,20 @@ def explain(request: ExplainRequest) -> dict:
         if request.part_id in cache:
             return cache[request.part_id]
         details = state.details.model_dump()
+        if state.parts:
+            # A record's explanation belongs to its own requested item, never
+            # whichever other item is currently being clarified.
+            current = session.last_result or {}
+            item = next((item for item in current.get("lookup", {}).get("items", [])
+                         if any(p["id"] == part["id"] for p in item["lookup"]["candidates"])), None)
+            if item:
+                details = item["details"]
         facts = {f: {"value": details[f], "source": state.sources.get(f, "lookup input (source unconfirmed)")}
                  for f in FIELDS if details[f] is not None}
+        if state.parts:
+            for field in ("part", "position", "side"):
+                if field in facts:
+                    facts[field]["source"] = "customer"
         unknown = [f for f in FIELDS if details[f] is None
                    and (f not in {"position", "side"} or part.get(f))]
         profile = next((v for v in CATALOG["vehicles"] if v["id"] == part["vehicle_id"]), {})
