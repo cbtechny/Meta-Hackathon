@@ -47,6 +47,25 @@ class ProductReliabilityTests(unittest.TestCase):
         for text,engine in [('four-cylinder','2.0L'),('SX4','4L'),('3.55L','3.5L'),('2.5L','5L')]:
             self.assertFalse(stated_engine_displacement(text,engine))
 
+    def test_two_liter_spellings_return_the_same_catalog_candidates(self):
+        candidates = None
+        for engine in ['2', '2.0', '2L', '2.0 L', '2.00l', '2 liters', '2.0 litres']:
+            with self.subTest(engine=engine):
+                response = self.client.post('/api/chat', json={'edits': {
+                    'year': 2007, 'make': 'Suzuki', 'model': 'SX4',
+                    'engine': engine, 'part': 'oil filter'}})
+                self.assertEqual(response.status_code, 200)
+                result = response.json()
+                self.assertEqual(result['details']['engine'], '2L')
+                self.assertTrue(result['lookup']['candidates'])
+                if candidates is None:
+                    candidates = result['lookup']['candidates']
+                self.assertEqual(result['lookup']['candidates'], candidates)
+
+    def test_engine_normalization_preserves_qualifiers_and_other_sizes(self):
+        for engine in ['2.0T', '2.0L EcoBoost', '2.0L diesel', '2.5L']:
+            self.assertEqual(ChatDetails(engine=engine).engine, engine)
+
     def test_health_does_not_call_providers_or_return_secrets(self):
         with patch.object(MetaProvider,'interpret_conversation',side_effect=AssertionError):
             response=self.client.get('/healthz')

@@ -64,14 +64,20 @@
  function bubble(role,text,welcome=false){const node=el('div',undefined,'chat-message '+role+(welcome?' welcome':''));node.append(el('span',role==='user'?'YOU':'COUNTERPILOT','chat-speaker'),el('div',text,'chat-bubble'));$('chat-messages').append(node);return node;}
  function scroll(target){const log=$('chat-messages');if(target){log.scrollTop+=target.getBoundingClientRect().top-log.getBoundingClientRect().top-10;}else log.scrollTop=log.scrollHeight;}
  function context(){const items=history.slice(-20).map(({role,content})=>({role,content}));while(items.length&&(items.reduce((sum,m)=>sum+m.content.length,0)>20000||new TextEncoder().encode(JSON.stringify(items)).length>32000))items.shift();return items;}
+ function normalizeEngine(value){
+  if(value==null)return null;
+  const text=String(value).trim().replace(/\b(?:liters?|litres?)\b/gi,'L');
+  return /^\d+(?:\.\d+)?\s*[lL]?$/.test(text)?`${Number.parseFloat(text)}L`:text;
+ }
  function fieldValue(field){
   const raw=$('chat-'+field).value.trim();if(!raw)return null;
   if(field==='year')return Number(raw);
+  if(field==='engine')return normalizeEngine(raw);
   if(field==='hybrid'){const normalized=raw.toLowerCase();if(['hybrid','yes','true'].includes(normalized))return true;if(['non-hybrid','non hybrid','no','false'].includes(normalized))return false;return raw;}
   return ['position','side'].includes(field)?raw.toLowerCase():raw;
  }
  function fieldText(field,value){return value==null?'':field==='hybrid'?(value?'Hybrid':'Non-hybrid'):String(value);}
- function readEdits(){const edits={};for(const f of fields){const value=fieldValue(f);if(value!==(details[f]??null))edits[f]=value;}return edits;}
+ function readEdits(){const edits={};for(const f of fields){const value=fieldValue(f),previous=f==='engine'?normalizeEngine(details[f]):(details[f]??null);if(value!==previous)edits[f]=value;}return edits;}
  function validateEdits(){
   for(const f of fields){const input=$('chat-'+f),value=fieldValue(f);input.setCustomValidity('');if(value==null)continue;
    if(f==='year'&&(!/^\d{4}$/.test(input.value.trim())||value<1980||value>2100))input.setCustomValidity('Enter a four-digit year from 1980 to 2100.');
@@ -123,7 +129,8 @@
   if($('chat-'+field).disabled)return;
   if(openCombo&&openCombo!==field)closeCombo();openCombo=field;comboIndex=-1;
   const input=$('chat-'+field),list=$('options-'+field),query=all?'':input.value.trim().toLowerCase();
-  const choices=optionsFor(field).filter(v=>!query||v.toLowerCase().includes(query));
+  const engineQuery=field==='engine'?normalizeEngine(query):null;
+  const choices=optionsFor(field).filter(v=>!query||v.toLowerCase().includes(query)||(engineQuery&&/^\d+(?:\.\d+)?L$/.test(engineQuery)&&Number.parseFloat(v)===Number.parseFloat(engineQuery)));
   comboValues=choices.slice(0,10).map(value=>({label:value,value}));comboValues.push({label:'Unknown / leave blank',value:''});
   list.replaceChildren();
   if(!choices.length)list.append(el('div',catalogLoaded?'No registered match. You can still type.':'Suggestions unavailable. You can still type.','combo-empty'));
@@ -311,7 +318,7 @@
   const vehicle=registered.vehicles.find(v=>v.id===event.detail?.id)||event.detail;if(!vehicle||typeof vehicle.id!=='string'||!/^[A-Za-z0-9._-]{1,80}$/.test(vehicle.id)||!Number.isInteger(vehicle.year)||typeof vehicle.make!=='string'||typeof vehicle.model!=='string'){event.preventDefault();window.CounterPilotUI?.announce('That vehicle could not be loaded. Try the catalog again.');return;}
   setDetailsOpen(false);begin(`Use the ${vehicle.year} ${vehicle.make} ${vehicle.model} demo configuration`,{message:'Demo '+vehicle.id});
  });
- $('chat-details-form').oninput=()=>{$('apply-details').disabled=busy||!!pending||!Object.keys(readEdits()).length;retireResults();save();};
+ $('chat-details-form').oninput=()=>{const changed=Object.keys(readEdits()).length>0;$('apply-details').disabled=busy||!!pending||!changed;if(changed)retireResults();save();};
  $('chat-details-form').onsubmit=event=>{event.preventDefault();if(!validateEdits())return;const edits=readEdits();if(!Object.keys(edits).length)return;closeCombo();const text='Corrected lookup details: '+Object.entries(edits).map(([f,v])=>f.replaceAll('_',' ')+': '+(v??'unknown')).join(', ')+'.';if(narrowPanel.matches)setDetailsOpen(false);begin(text,{edits});};
  $('new-conversation').onclick=()=>{window.CounterPilotAssist?.reset();clearComparison();$('how-it-works').hidden=true;$('how-toggle').setAttribute('aria-expanded','false');version++;controller?.abort();controller=null;pending=null;history=[];snapshots=[];details={};lastResult=null;busy=false;panelDismissed=false;lastKnownCount=0;clearTimeout(carTimer);$('composer-track').classList.remove('is-driving');hideHint();seenHints.clear();setDetailsOpen(false);$('chat-messages').replaceChildren();$('chat-error').hidden=true;$('chat-input').value='';resizeComposer();showDetails();try{sessionStorage.removeItem(storageKey);}catch{}$('chat-input').focus({preventScroll:true});showHint('start','Start with the part and vehicle. A VIN works too.');};
  $('dismiss-hint').onclick=hideHint;

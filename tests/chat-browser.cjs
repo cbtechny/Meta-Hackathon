@@ -182,6 +182,25 @@ const live = process.env.COUNTERPILOT_CHAT_LIVE === '1';
    assert.equal(await page.locator('.previous-result .compare-choice input:not([disabled])').count(),0);assert.equal(await page.locator('.compare-choice input:checked').count(),0);
    await fresh();assert.equal(await page.locator('#compare-items').innerText(),'');
   });
+  await check('equivalent two-liter spellings keep current results and engine suggestions',async()=>{
+   const twoLiter=await fixture({year:2007,make:'Suzuki',model:'SX4',part:'oil filter',engine:'2L'});
+   await fresh();await routeResult(twoLiter);await send('Oil filter for a 2007 Suzuki SX4 2L');
+   if(await page.locator('#lookup-panel').isHidden())await page.locator('#details-toggle').click();
+   for(const spelling of ['2','2.0','2L','2.0 L','2 liters','2.0 litres']){
+    await page.locator('#chat-engine').fill(spelling);
+    await page.getByRole('option',{name:'2.0L',exact:true}).waitFor();
+    assert.equal(await page.locator('#apply-details').isDisabled(),true);
+    assert.equal(await active().count(),1);
+   }
+   await page.getByRole('option',{name:'2.0L',exact:true}).click();
+   assert.equal(await page.locator('#apply-details').isDisabled(),true);
+   assert.equal(await active().count(),1);
+   for(const spelling of ['2.0T','2.0L diesel','2.5L']){
+    await page.locator('#chat-engine').fill(spelling);
+    assert.equal(await page.locator('#apply-details').isEnabled(),true);
+   }
+   await fresh();
+  });
   const editable=await fixture({year:2019,make:'Toyota',model:'RAV4',part:'oil filter',engine:'2.5L'});
   await fresh();await routeResult(editable);await send('Oil filter for a 2019 Toyota RAV4 with a 2.5L engine');
   await check('details appear without stealing focus and autocomplete allows registered corrections',async()=>{

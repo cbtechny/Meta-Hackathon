@@ -31,6 +31,7 @@
    if(version!==scanVersion)return;
    const response=await fetch('/api/vin-photo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image}),signal:request.signal});
    const result=await response.json();if(version!==scanVersion||!dialog.open)return;
+   if(response.status===404)throw new Error('The running server needs an update. Restart CounterPilot with start.ps1, then refresh this page. You can also type the VIN.');
    if(!response.ok)throw new Error(response.status===422||response.status===413?result.detail:'Photo reading is unavailable. Retry, choose another photo, or type the VIN.');
    status(result.message);$('vin-review').value=result.status==='readable'?(result.vin||''):'';$('vin-review-panel').hidden=false;$('vin-review').focus();
   }catch(error){if(version===scanVersion){status(error.name==='AbortError'?'Reading took too long. Retry or type the VIN.':error.message||'Photo reading failed. Retry or type the VIN.');$('vin-review-panel').hidden=false;}}
