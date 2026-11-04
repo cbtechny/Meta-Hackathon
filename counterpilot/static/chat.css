@@ -7,7 +7,7 @@
 
 /* The input's top border is a tiny track; decorative motion never gates a request. */
 .composer{position:relative}
-.composer-track{position:absolute;left:24px;right:24px;top:-20px;height:21px;pointer-events:none;color:var(--green)}
+.composer-track{position:absolute;left:24px;right:24px;top:-20px;height:21px;pointer-events:none;color:#c93636}
 .track-car{position:absolute;left:0;bottom:0;overflow:visible;opacity:.85}
 .chat-active .track-car{opacity:0}
 .composer-track.is-driving .track-car{animation:car-drive 1.45s cubic-bezier(.45,0,.2,1) both}
