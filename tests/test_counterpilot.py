@@ -2,6 +2,7 @@ import copy
 import io
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ from pydantic import ValidationError
 from counterpilot.app import app
 from counterpilot.domain import CATALOG, Criteria, load_catalog, search
 from counterpilot.providers import MockProvider, MetaProvider, ProviderError
+from counterpilot.catalog_io import DATA_DIR, PART_COLUMNS
 from counterpilot_vin_lookup import decode_vin, VinLookupError
 
 
@@ -27,7 +29,7 @@ class LookupTests(unittest.TestCase):
         result = self.query("Oil filter for a 2019 Toyota RAV4")
         self.assertEqual(result["status"], "candidates")
         self.assertEqual(len(result["candidates"]), 1)
-        self.assertEqual(result["candidates"][0]["category"], "oil_filter")
+        self.assertEqual(result["candidates"][0]["part_type"], "oil_filter")
 
     def test_all_vehicle_families_and_categories(self):
         for v in CATALOG["vehicles"]:
@@ -38,17 +40,18 @@ class LookupTests(unittest.TestCase):
                     self.assertEqual(result["status"], "candidates")
                     self.assertTrue(all(p["vehicle_id"] == v["id"] for p in result["candidates"]))
 
-    def test_brake_split_and_position(self):
+    def test_brake_position_and_caliper_side(self):
         text = "Rotors for a 2021 Ford F-150"
         result = self.query(text)
         self.assertEqual(result["questions"][0]["field"], "position")
         self.assertFalse(result["candidates"])
         result = self.query(text, position="rear")
-        self.assertEqual(result["questions"][0]["field"], "brake_package")
-        self.assertFalse(result["candidates"])
-        standard = self.query(text, position="rear", brake_package="standard")
-        heavy = self.query(text, position="rear", brake_package="heavy-duty")
-        self.assertNotEqual(standard["candidates"][0]["id"], heavy["candidates"][0]["id"])
+        self.assertEqual(result["status"], "candidates")
+        caliper = self.query("Front caliper for a 2021 Ford F-150")
+        self.assertEqual(caliper["questions"][0]["field"], "side")
+        left = self.query("Front caliper for a 2021 Ford F-150", side="left")
+        right = self.query("Front caliper for a 2021 Ford F-150", side="right")
+        self.assertNotEqual(left["candidates"][0]["id"], right["candidates"][0]["id"])
         front = self.query(text, position="front")
         self.assertEqual(front["status"], "candidates")
 
@@ -58,7 +61,7 @@ class LookupTests(unittest.TestCase):
         self.assertEqual({q["field"] for q in result["questions"]}, {"year", "make", "model"})
 
     def test_unknown_vehicle_and_category(self):
-        self.assertEqual(self.query("alternator for a 2021 F-150")["status"], "outside_coverage")
+        self.assertEqual(self.query("turbocharger for a 2021 F-150")["status"], "outside_coverage")
         self.assertEqual(self.query("oil filter for a 2018 RAV4")["status"], "outside_coverage")
 
     def test_manual_does_not_call_provider(self):
@@ -69,7 +72,7 @@ class LookupTests(unittest.TestCase):
 
     def test_explicit_criteria_override(self):
         result = self.query("Oil filter for a 2019 RAV4", category="cabin_filter")
-        self.assertEqual(result["candidates"][0]["category"], "cabin_filter")
+        self.assertEqual(result["candidates"][0]["part_type"], "cabin_filter")
 
     def test_interchange_is_not_fitment(self):
         data = copy.deepcopy(CATALOG)
@@ -83,7 +86,7 @@ class LookupTests(unittest.TestCase):
 
     def test_reject_invalid_input(self):
         for payload in [{"provider": "unknown"}, {"criteria": {"year": 1900}},
-                        {"criteria": {"brake_package": "guess"}}, {"criteria": {"fits": True}},
+                        {"criteria": {"side": "guess"}}, {"criteria": {"fits": True}},
                         {"text": "x" * 2001}]:
             self.assertEqual(self.client.post("/api/search", json=payload).status_code, 422)
 
@@ -94,23 +97,30 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(self.query("oil filter for a 2019 RAV4")["status"], "candidates")
 
     def test_catalog_validation(self):
-        self.assertEqual(len(CATALOG["parts"]), 30)
-        data = copy.deepcopy(CATALOG)
-        data["parts"][0]["vehicle_id"] = "missing"
+        self.assertEqual(len(CATALOG["parts"]), 180)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "bad.json"
-            path.write_text(json.dumps(data))
+            import csv
+            path = Path(directory) / "data"
+            shutil.copytree(DATA_DIR, path)
+            with (path / "parts.csv").open(encoding="utf-8", newline="") as stream:
+                rows = list(csv.DictReader(stream))
+            rows[0]["vehicle_id"] = "missing"
+            with (path / "parts.csv").open("w", encoding="utf-8", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
             with self.assertRaises(ValueError):
                 load_catalog(path)
 
     def test_catalog_is_fictional_with_evidence(self):
         for p in CATALOG["parts"]:
             self.assertTrue(p["fictional"])
-            self.assertTrue(p["part_number"].startswith("DEMO-"))
+            self.assertEqual(p["id"], "DEMO-" + p["part_number"])
+            self.assertEqual(p["display_label"], "Demo part — simulated fitment")
             self.assertTrue(p["evidence"])
 
     def test_static_routes(self):
-        for path in ["/", "/static/app.js", "/static/style.css", "/api/catalog"]:
+        for path in ["/", "/static/chat.js", "/static/chat.css", "/api/catalog"]:
             self.assertEqual(self.client.get(path).status_code, 200)
 
 
@@ -151,6 +161,25 @@ class ProviderTests(unittest.TestCase):
 
 
 class VinTests(unittest.TestCase):
+    def test_formatted_vin_and_drivetrain_normalization(self):
+        for drive, expected in [('AWD/All-Wheel Drive', 'AWD'), ('Front-Wheel Drive', 'FWD'), ('4x2', '4x2')]:
+            response = io.BytesIO(json.dumps({'Results': [{'Make': 'HONDA', 'DriveType': drive}]}).encode())
+            with patch('counterpilot_vin_lookup.urlopen', return_value=response) as service:
+                result = decode_vin('1hgc m826-33a004352')
+            self.assertIn('/1HGCM82633A004352?', service.call_args.args[0].full_url)
+            self.assertEqual(result['drivetrain'], expected)
+            self.assertEqual(result['drivetrain_raw'], drive)
+
+    def test_bad_upstream_responses_are_recoverable_and_sanitized(self):
+        for payload in [b'[]', b'{"Results":[null]}', b'not json', b'\xff', b'x' * 131073]:
+            with patch('counterpilot_vin_lookup.urlopen', return_value=io.BytesIO(payload)):
+                with self.assertRaises(VinLookupError):
+                    decode_vin('1HGCM82633A004352')
+        with patch('counterpilot_vin_lookup.urlopen', side_effect=OSError('private transport detail')):
+            with self.assertRaises(VinLookupError) as error:
+                decode_vin('1HGCM82633A004352')
+        self.assertNotIn('private', str(error.exception))
+
     def test_invalid_vin(self):
         for vin in ["", "invalid", "I" * 17]:
             with self.assertRaises(VinLookupError):

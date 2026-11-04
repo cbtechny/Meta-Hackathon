@@ -1,0 +1,21 @@
+// Three bounded live Meta calls: normal chat, explanation, and photo extraction.
+const {chromium}=require(process.env.COUNTERPILOT_PLAYWRIGHT||'playwright');
+const assert=require('node:assert/strict'),fs=require('node:fs');
+const base=process.env.COUNTERPILOT_CHAT_URL||'http://127.0.0.1:8017';
+(async()=>{
+ const browser=await chromium.launch({channel:'msedge',headless:true});
+ try{
+  const page=await browser.newPage({viewport:{width:1440,height:1000}});page.setDefaultTimeout(40000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(base);
+  if(process.env.COUNTERPILOT_VIN_CONFIRM_ONLY==='1'){
+   const response=page.waitForResponse(r=>r.url()===base+'/api/chat');await page.locator('#chat-input').fill('VIN 1HGCM82633A004352');await page.locator('#chat-send').click();const proposal=await(await response).json();assert.equal(proposal.question.field,'vin_confirmation');assert.equal(proposal.details.make,null);assert.equal(proposal.state.decoded.make.toLowerCase(),'honda');await page.locator('#chat-send:not([disabled])').waitFor();const accepted=page.waitForResponse(r=>r.url()===base+'/api/chat');await page.getByRole('button',{name:'Yes',exact:true}).click();const applied=await(await accepted).json();assert.equal(applied.details.make.toLowerCase(),'honda');assert.equal(applied.state.confirmed,true);assert.equal(applied.lookup.candidates.length,0);fs.writeFileSync('artifacts/vin-ai/live-browser-confirmation.json',JSON.stringify({nhtsa_decode:true,vehicle_applied_after_confirmation:true,unsupported_vehicle_no_parts:true,meta_calls:0},null,2));console.log('PASS live NHTSA confirmation and unsupported-vehicle handling without additional Meta calls');return;
+  }
+  await page.locator('#chat-input').fill('Oil filter for a 2019 Toyota RAV4 2.5L');await page.locator('#chat-send').click();await page.locator('#chat-send:not([disabled])').waitFor();
+  await page.locator('.why-result').last().click();await page.locator('.explanation-label').waitFor();assert.match(await page.locator('.explanation-label').innerText(),/AI-guided/);assert.match(await page.locator('.why-summary').innerText(),/simulated application/);assert.match(await page.locator('.why-summary').innerText(),/FL-00131/);
+  await page.locator('#dismiss-hint').click().catch(()=>{});await page.screenshot({path:'artifacts/vin-ai/live-explanation-desktop.png',fullPage:true});await page.setViewportSize({width:390,height:844});if(await page.locator('#lookup-panel').isVisible())await page.locator('#close-details').click();await page.screenshot({path:'artifacts/vin-ai/live-explanation-mobile.png',fullPage:true});
+  await page.locator('#new-conversation').click();await page.locator('#scan-vin').click();await page.locator('#vin-file').setInputFiles('artifacts/vin-ai/clear.png');await page.locator('#vin-read').click();await page.locator('#vin-review').waitFor({state:'visible'});assert.equal(await page.locator('#vin-review').inputValue(),'1HGCM82633A004352');await page.screenshot({path:'artifacts/vin-ai/live-scan-mobile.png',fullPage:true});
+  const resultPromise=page.waitForResponse(r=>r.url()===base+'/api/chat');await page.locator('#vin-confirm').click();const data=await(await resultPromise).json();assert.equal(data.question?.field,'vin_confirmation');assert.equal(data.state.decoded.make.toLowerCase(),'honda');assert.equal(data.details.make,null);await page.locator('#chat-send:not([disabled])').waitFor();
+  await page.getByRole('button',{name:'Yes',exact:true}).click();await page.locator('#chat-send:not([disabled])').waitFor();assert.match(await page.locator('#chat-messages').innerText(),/honda/i);assert.equal(await page.locator('.candidate').count(),0);
+  assert.deepEqual(errors,[]);fs.writeFileSync('artifacts/vin-ai/live-browser-results.json',JSON.stringify({live_meta:true,synthetic_photo:true,explanation:true,vin_extraction:true,nhtsa_decode:true,vehicle_applied_after_confirmation:true,unsupported_vehicle_no_parts:true,meta_call_limit:3,errors},null,2));console.log('PASS live chat, grounded explanation, synthetic VIN extraction, NHTSA decode, and explicit vehicle confirmation');
+ }finally{await browser.close();}
+})().catch(error=>{console.error(error);process.exitCode=1;});

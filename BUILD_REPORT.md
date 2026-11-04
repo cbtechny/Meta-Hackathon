@@ -1,5 +1,7 @@
 # CounterPilot build report
 
+Current catalog migration: see [CSV catalog maintenance](Dev/Docs/CATALOG_DATA.md). The verification below records the earlier catalog; current sample numbers, applications and position/side flow come from CSV.
+
 ## Delivered
 A runnable local FastAPI demo with a responsive single-screen interface, 30 fictional application records across all five requested families, deterministic lookup, position/package clarification, evidence cards, explicit vehicle acknowledgment, manual input, a bounded offline parser, optional Meta adapter, and VIN identity decoding with confirmation.
 
@@ -16,7 +18,7 @@ Open http://127.0.0.1:8000 while the local process is running. Restart with star
 - Exact Python package versions are recorded in requirements.lock.txt.
 
 ## Remaining limits
-- No MODEL_API_KEY was available. The Meta adapter follows the official Chat Completions documentation and passes mocked response/error validation tests, but no real Meta request has been verified. Select offline/manual mode until a key is configured.
+- No MODEL_API_KEY was available during the initial build. Follow-up live verification on November 3, 2026 passed ten API scenarios and a real browser search; see [the verification report](Dev/Docs/META_API_VERIFICATION.md) for current results and credential checks.
 - All application/part records and cross-references are invented. No private workbook records or screenshots were copied into the app.
 - Configuration acknowledgment in the UI is a user assertion, not an equipment verification service. API matches describe fictional fixture applications.
 - Offline interpretation has a deliberately small vocabulary. Symptoms, complex requests, multiple requested parts and unsupported categories require manual clarification or future work.

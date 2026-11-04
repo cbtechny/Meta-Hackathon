@@ -28,6 +28,16 @@ def _clean(value: Any) -> str | None:
     return value
 
 
+def _drivetrain(value: str | None) -> str | None:
+    if not value:
+        return None
+    abbreviation = value.split("/")[0].strip().upper()
+    if abbreviation in {"AWD", "FWD", "RWD", "4WD"}:
+        return abbreviation
+    return {"ALL-WHEEL DRIVE": "AWD", "FRONT-WHEEL DRIVE": "FWD",
+            "REAR-WHEEL DRIVE": "RWD", "FOUR-WHEEL DRIVE": "4WD", "4X4": "4WD"}.get(abbreviation, value)
+
+
 def decode_vin(vin: str, model_year: int | None = None, timeout: float = 12.0) -> dict[str, Any]:
     """Decode a 17-character VIN and return a compact, stable field mapping.
 
@@ -36,7 +46,7 @@ def decode_vin(vin: str, model_year: int | None = None, timeout: float = 12.0) -
         model_year: Optional year hint supported by NHTSA for VIN decoding.
         timeout: HTTP timeout in seconds.
     """
-    normalized = re.sub(r"\s+", "", vin).upper()
+    normalized = re.sub(r"[\s-]+", "", vin).upper()
     if not VIN_PATTERN.fullmatch(normalized):
         raise VinLookupError("Enter a valid 17-character VIN (letters I, O, and Q are not used).")
     if model_year is not None and not 1980 <= int(model_year) <= 2100:
@@ -51,14 +61,19 @@ def decode_vin(vin: str, model_year: int | None = None, timeout: float = 12.0) -
     )
     try:
         with urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            raw = response.read(131073)
+            if len(raw) > 131072:
+                raise VinLookupError("NHTSA vPIC returned an oversized result.")
+            payload = json.loads(raw.decode("utf-8"))
     except HTTPError as exc:
         raise VinLookupError(f"NHTSA vPIC returned HTTP {exc.code}.") from exc
-    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
-        raise VinLookupError(f"Could not reach or read NHTSA vPIC: {exc}.") from exc
+    except (OSError, URLError, json.JSONDecodeError, UnicodeError) as exc:
+        raise VinLookupError("Could not reach or read NHTSA vPIC. Retry or enter vehicle details manually.") from exc
 
+    if not isinstance(payload, dict):
+        raise VinLookupError("NHTSA vPIC returned an unusable result.")
     rows = payload.get("Results") or []
-    if not rows:
+    if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
         raise VinLookupError("NHTSA vPIC returned no decode result for this VIN.")
     row = rows[0]
 
@@ -83,7 +98,8 @@ def decode_vin(vin: str, model_year: int | None = None, timeout: float = 12.0) -
             "fuel": pick("FuelTypePrimary", "FuelTypeSecondary"),
             "configuration": pick("EngineConfiguration"),
         },
-        "drivetrain": pick("DriveType"),
+        "drivetrain": _drivetrain(pick("DriveType")),
+        "drivetrain_raw": pick("DriveType"),
         "transmission": pick("TransmissionStyle"),
         "manufacturer": pick("Manufacturer"),
         "plant_country": pick("PlantCountry"),

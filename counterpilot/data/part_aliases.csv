@@ -1,0 +1,87 @@
+alias,part_type
+ac filter,cabin_filter
+accessory belt,serpentine_belt
+air cleaner,air_filter
+air filter,air_filter
+air filters,air_filter
+alternator,alternator
+alternators,alternator
+belt tensioner,belt_tensioner
+brake caliper,brake_caliper
+brake calipers,brake_caliper
+brake disc,brake_rotor
+brake discs,brake_rotor
+brake disk,brake_rotor
+brake disks,brake_rotor
+brake pad,brake_pad
+brake pads,brake_pad
+brake rotor,brake_rotor
+brake rotors,brake_rotor
+cabin air filter,cabin_filter
+cabin filter,cabin_filter
+cabin filters,cabin_filter
+caliper,brake_caliper
+calipers,brake_caliper
+coil pack,ignition_coil
+coil packs,ignition_coil
+control arm,control_arm
+control arms,control_arm
+coolant pump,water_pump
+cv axle,cv_axle
+cv axles,cv_axle
+cv shaft,cv_axle
+disc brake pads,brake_pad
+drive axle,cv_axle
+drive belt,serpentine_belt
+engine air filter,air_filter
+engine air filters,air_filter
+engine oil filter,oil_filter
+fan belt,serpentine_belt
+fuel pump,fuel_pump
+fuel pump module,fuel_pump
+half shaft,cv_axle
+halfshaft,cv_axle
+hub assembly,wheel_hub
+hub bearing,wheel_hub
+ignition coil,ignition_coil
+ignition coils,ignition_coil
+lower control arm,control_arm
+oil filter,oil_filter
+oil filters,oil_filter
+outer tie rod,tie_rod_end
+outer tie rod end,tie_rod_end
+pads,brake_pad
+plugs,spark_plug
+pollen filter,cabin_filter
+radiator,radiator
+rotor,brake_rotor
+rotors,brake_rotor
+serpentine belt,serpentine_belt
+serpentine belt tensioner,belt_tensioner
+shock,shock_absorber
+shock absorber,shock_absorber
+shock absorbers,shock_absorber
+shocks,shock_absorber
+spark plug,spark_plug
+spark plugs,spark_plug
+starter,starter
+starter motor,starter
+strut,strut_assembly
+strut assemblies,strut_assembly
+strut assembly,strut_assembly
+struts,strut_assembly
+tensioner,belt_tensioner
+thermostat,thermostat
+tie rod,tie_rod_end
+tie rod end,tie_rod_end
+tie rods,tie_rod_end
+water pump,water_pump
+wheel bearing,wheel_hub
+wheel hub,wheel_hub
+wheel hub bearing,wheel_hub
+windshield wipers,wiper_blade
+wiper,wiper_blade
+wiper blade,wiper_blade
+wiper blades,wiper_blade
+wipers,wiper_blade
+wishbone,control_arm

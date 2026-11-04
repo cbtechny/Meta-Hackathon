@@ -29,6 +29,8 @@ The endpoint is `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues`. NHTSA
 
 VIN decode is a vehicle-identity aid, not a parts-fitment authority. Manufacturer-reported fields may be missing or broad, and the result may not identify brake package, production split, or other option-sensitive detail needed by a parts catalog. CounterPilot should retain the decoded fields as a proposed vehicle configuration, show unknowns, and then use deterministic catalog applications and clarification/physical measurement where required.
 
-Treat VINs as sensitive vehicle identifiers: do not log them unnecessarily or commit real customer VINs to Git. The code contains no credentials. This is a small reusable module, not yet connected to the project's web form or Muse Spark provider.
+VIN lookup is connected to the chat at `/`. Paste a VIN (spaces and hyphens are accepted), review the decoded identity, and answer Yes to accept it. Only accepted VIN details count toward confirmed details. Corrections rerun the existing catalog lookup; a vehicle outside catalog coverage does not receive substitute parts. Missing options remain unknown. Invalid VINs and service failures preserve the conversation and allow manual entry.
+
+VIN submissions use NHTSA directly on the backend; no Meta call is needed to decode them. Conversation history can include user-entered VIN text, so use public examples for demonstrations and avoid entering customer identifiers. Treat VINs as sensitive vehicle identifiers: do not log them unnecessarily or commit real customer VINs to Git. Transport errors are sanitized before display. The response is size limited and explicit drivetrain abbreviations are normalized for the existing catalog; ambiguous equipment descriptions remain unchanged.
 
 Source: [NHTSA vPIC API](https://vpic.nhtsa.dot.gov/api/); [vPIC FAQ](https://vpic.nhtsa.dot.gov/api/Home/Index/FAQ).
